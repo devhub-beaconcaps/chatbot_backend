@@ -627,31 +627,46 @@ def rerank_with_cross_encoder(question: str, matches, top_k: int):
 
 def search_pinecone(question: str, top_k: int = 8):
     """Search Pinecone with hybrid search support."""
+
     chronology = is_chronology_query(question)
     requested_year = extract_requested_year(question)
-    
-    # Clean query for semantic search
+
     if chronology or requested_year:
         semantic_question = strip_time_scope(question)
     else:
         semantic_question = question.strip()
-    
+
     search_top_k = 50 if (chronology or requested_year) else max(top_k, 16)
     search_top_k = min(search_top_k, 100)
-    
+
     query_vector = create_query_embedding(semantic_question)
-    
-    # Hybrid search
+
     if USE_HYBRID_SEARCH:
         sparse_vector = bm25_encoder.encode_queries(question)
+
+        alpha = 0.5
+
+        hybrid_dense = [
+            value * alpha
+            for value in query_vector
+        ]
+
+        hybrid_sparse = {
+            "indices": sparse_vector["indices"],
+            "values": [
+                value * (1 - alpha)
+                for value in sparse_vector["values"]
+            ]
+        }
+
         results = index.query(
             namespace=PINECONE_NAMESPACE,
-            vector=query_vector,
-            sparse_vector=sparse_vector,
+            vector=hybrid_dense,
+            sparse_vector=hybrid_sparse,
             top_k=search_top_k,
-            include_metadata=True,
-            alpha=0.5
+            include_metadata=True
         )
+
     else:
         results = index.query(
             namespace=PINECONE_NAMESPACE,
@@ -659,9 +674,8 @@ def search_pinecone(question: str, top_k: int = 8):
             top_k=search_top_k,
             include_metadata=True
         )
-    
-    return results
 
+    return results
 # ============================================================
 # QUERY EXPANSION
 # ============================================================
